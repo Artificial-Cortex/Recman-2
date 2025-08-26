@@ -84,6 +84,7 @@ async function startRecording(interaction, voiceChannel) {
 
   voiceChannel.members.forEach(member => {
     if (member.user.bot) return;
+
     const opusStream = receiver.subscribe(member.id, { end: { behavior: EndBehaviorType.Manual } });
     const decoder = new prism.opus.Decoder({
       frameSize: 960,
@@ -100,9 +101,13 @@ async function startRecording(interaction, voiceChannel) {
   });
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp('🔴 Recording started!');
+    if (typeof interaction.followUp === "function") {
+      await interaction.followUp('🔴 Recording started!');
+    }
   } else {
-    await interaction.reply('🔴 Recording started!');
+    if (typeof interaction.reply === "function") {
+      await interaction.reply('🔴 Recording started!');
+    }
   }
 }
 
@@ -111,15 +116,26 @@ async function stopRecording(interaction, voiceChannel) {
 
   if (!recordings[voiceChannel.id]) {
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ No active recording in this channel.', ephemeral: true });
+      if (typeof interaction.reply === "function") {
+        await interaction.reply({ content: '❌ No active recording in this channel.', ephemeral: true });
+      }
     } else {
-      await interaction.followUp({ content: '❌ No active recording in this channel.', ephemeral: true });
+      if (typeof interaction.followUp === "function") {
+        await interaction.followUp({ content: '❌ No active recording in this channel.', ephemeral: true });
+      }
     }
     if (connection) connection.destroy();
     return;
   }
 
-  if (!interaction.deferred) await interaction.deferReply();
+  // Type check before calling deferReply
+  if (
+    typeof interaction.deferReply === "function" &&
+    interaction.isChatInputCommand &&
+    interaction.isChatInputCommand()
+  ) {
+    if (!interaction.deferred) await interaction.deferReply();
+  }
 
   Object.values(recordings[voiceChannel.id]).forEach(({ outputStream, opusStream, decoder }) => {
     if (opusStream) opusStream.destroy();
@@ -144,7 +160,9 @@ async function stopRecording(interaction, voiceChannel) {
     });
 
   if (inputFiles.length === 0) {
-    await interaction.editReply('No audio was recorded. Make sure someone is speaking and not muted!');
+    if (typeof interaction.editReply === "function") {
+      await interaction.editReply('No audio was recorded. Make sure someone is speaking and not muted!');
+    }
     if (connection) connection.destroy();
     delete recordings[voiceChannel.id];
     return;
@@ -165,7 +183,9 @@ async function stopRecording(interaction, voiceChannel) {
     inputFiles.forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
     if (error) {
       console.error('ffmpeg error:', error);
-      await interaction.editReply('Error mixing the audio.');
+      if (typeof interaction.editReply === "function") {
+        await interaction.editReply('Error mixing the audio.');
+      }
       if (connection) connection.destroy();
       delete recordings[voiceChannel.id];
       return;
@@ -173,18 +193,23 @@ async function stopRecording(interaction, voiceChannel) {
 
     try {
       const fileUrl = await uploadToGoogleDrive(outFilename);
-      await interaction.editReply(`Recording finished and uploaded: ${fileUrl}`);
+      if (typeof interaction.editReply === "function") {
+        await interaction.editReply(`Recording finished and uploaded: ${fileUrl}`);
+      }
       if (fs.existsSync(outFilename)) fs.unlinkSync(outFilename);
       if (connection) connection.destroy();
       delete recordings[voiceChannel.id];
     } catch (err) {
-      await interaction.editReply('Failed to upload to Drive: ' + err.message);
+      if (typeof interaction.editReply === "function") {
+        await interaction.editReply('Failed to upload to Drive: ' + err.message);
+      }
       if (connection) connection.destroy();
       delete recordings[voiceChannel.id];
     }
   });
 }
 
+// Prefix commands (message-based)
 client.on('messageCreate', async message => {
   if (!message.guild || message.author.bot) return;
   if (message.content === "!record") {
@@ -199,6 +224,7 @@ client.on('messageCreate', async message => {
   }
 });
 
+// Slash commands (interaction-based)
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'record') {
