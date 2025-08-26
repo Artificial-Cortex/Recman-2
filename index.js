@@ -56,7 +56,7 @@ function formatFilename(guild, channel, users) {
     String(date.getMinutes()).padStart(2, '0'),
     String(date.getSeconds()).padStart(2, '0')
   ].join('-');
-  return `${guild} ${channel} ${users.join(', ')} ${formattedDate}.aac`;
+  return `${guild} ${channel} ${users.join(', ')} ${formattedDate}.mp3`;
 }
 
 async function startRecording(interaction, voiceChannel) {
@@ -84,22 +84,16 @@ async function startRecording(interaction, voiceChannel) {
 
   voiceChannel.members.forEach(member => {
     if (member.user.bot) return;
-
-    const opusStream = receiver.subscribe(member.id, {
-      end: { behavior: EndBehaviorType.Manual }
-    });
-
+    const opusStream = receiver.subscribe(member.id, { end: { behavior: EndBehaviorType.Manual } });
     const decoder = new prism.opus.Decoder({
       frameSize: 960,
       channels: 2,
       rate: 48000,
     });
-
     const outputFilePath = path.join(recordingsDir, `${member.id}.pcm`);
     const outputStream = fs.createWriteStream(outputFilePath);
 
     opusStream.on('error', err => console.warn(`Opus stream error for ${member.user.tag}: ${err.message}`));
-
     opusStream.pipe(decoder).pipe(outputStream);
 
     recordings[voiceChannel.id][member.id] = { outputStream, opusStream, decoder };
@@ -114,6 +108,7 @@ async function startRecording(interaction, voiceChannel) {
 
 async function stopRecording(interaction, voiceChannel) {
   const connection = getVoiceConnection(voiceChannel.guild.id);
+
   if (!recordings[voiceChannel.id]) {
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({ content: '❌ No active recording in this channel.', ephemeral: true });
@@ -164,7 +159,7 @@ async function stopRecording(interaction, voiceChannel) {
   inputFiles.forEach(f => {
     ffmpegCmd += `-f s16le -ar 48000 -ac 2 -i "${f}" `;
   });
-  ffmpegCmd += `-filter_complex "amix=inputs=${inputFiles.length}:duration=first:dropout_transition=2" -ac 2 -c:a aac -b:a 128k -f adts "${outFilename}"`;
+  ffmpegCmd += `-filter_complex "amix=inputs=${inputFiles.length}:duration=first:dropout_transition=2" -ac 2 -c:a libmp3lame -b:a 192k -f mp3 "${outFilename}"`;
 
   exec(`"${ffmpegPath}" ${ffmpegCmd}`, async error => {
     inputFiles.forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
@@ -179,9 +174,7 @@ async function stopRecording(interaction, voiceChannel) {
     try {
       const fileUrl = await uploadToGoogleDrive(outFilename);
       await interaction.editReply(`Recording finished and uploaded: ${fileUrl}`);
-
       if (fs.existsSync(outFilename)) fs.unlinkSync(outFilename);
-
       if (connection) connection.destroy();
       delete recordings[voiceChannel.id];
     } catch (err) {
@@ -237,10 +230,10 @@ async function uploadToGoogleDrive(filename) {
 
   const fileMetadata = {
     name: path.basename(filename),
-    parents: ['1L-rWCLRYns6XupBk-lLqKx5irLUzt6pB'] // Your Drive folder ID here
+    parents: ['16skCffdbQtO1J2ZLO18mGy2zsm-Xptb3'] // Replace with your new folder ID
   };
   const media = {
-    mimeType: 'audio/aac',
+    mimeType: 'audio/mp3',
     body: fs.createReadStream(filename)
   };
   const file = await drive.files.create({
@@ -253,11 +246,10 @@ async function uploadToGoogleDrive(filename) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
 const http = require('http');
 const PORT = process.env.PORT || 3000;
-
 http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type': 'text/plain'});
   res.end('Discord bot is running!\n');
 }).listen(PORT);
-
