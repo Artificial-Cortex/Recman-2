@@ -61,7 +61,6 @@ function formatFilename(guild, channel, users) {
 
 async function startRecording(interaction, voiceChannel) {
   if (!voiceChannel) {
-    // Correct user feedback for both types
     if (typeof interaction.reply === "function") {
       await interaction.reply({ content: 'You need to be in a voice channel to start recording!', ephemeral: true });
     }
@@ -88,6 +87,7 @@ async function startRecording(interaction, voiceChannel) {
 
   voiceChannel.members.forEach(member => {
     if (member.user.bot) return;
+
     const opusStream = receiver.subscribe(member.id, { end: { behavior: EndBehaviorType.Manual } });
     const decoder = new prism.opus.Decoder({
       frameSize: 960,
@@ -97,13 +97,19 @@ async function startRecording(interaction, voiceChannel) {
     const outputFilePath = path.join(recordingsDir, `${member.id}.pcm`);
     const outputStream = fs.createWriteStream(outputFilePath);
 
-    opusStream.on('error', err => console.warn(`Opus stream error for ${member.user.tag}: ${err.message}`));
+    // Error handling patch to prevent crashing on corrupted data
+    opusStream.on('error', err => {
+      console.warn(`Opus stream error for ${member.user.tag}: ${err.message}`);
+    });
+    decoder.on('error', err => {
+      console.warn(`Opus decoder error for ${member.user.tag}: ${err.message}`);
+    });
+
     opusStream.pipe(decoder).pipe(outputStream);
 
     recordings[voiceChannel.id][member.id] = { outputStream, opusStream, decoder };
   });
 
-  // If it's an interaction, reply or follow up
   if (typeof interaction.deferReply === "function" && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
     if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
     await interaction.editReply('🔴 Recording started!');
@@ -115,7 +121,6 @@ async function startRecording(interaction, voiceChannel) {
 async function stopRecording(interaction, voiceChannel) {
   const connection = getVoiceConnection(voiceChannel.guild.id);
 
-  // Defensive reply handling: always reply, never double reply
   if (!recordings[voiceChannel.id]) {
     if (typeof interaction.deferReply === "function" && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
       if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
@@ -203,7 +208,7 @@ async function stopRecording(interaction, voiceChannel) {
   });
 }
 
-// Prefix command support
+// Prefix commands
 client.on('messageCreate', async message => {
   if (!message.guild || message.author.bot) return;
   if (message.content === "!record") {
@@ -218,7 +223,7 @@ client.on('messageCreate', async message => {
   }
 });
 
-// Slash command support
+// Slash commands
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
   const voiceChannel = interaction.member.voice.channel;
