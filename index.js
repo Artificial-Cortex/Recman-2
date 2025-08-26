@@ -61,7 +61,11 @@ function formatFilename(guild, channel, users) {
 
 async function startRecording(interaction, voiceChannel) {
   if (!voiceChannel) {
-    return interaction.reply('You need to be in a voice channel to start recording!');
+    // Correct user feedback for both types
+    if (typeof interaction.reply === "function") {
+      await interaction.reply({ content: 'You need to be in a voice channel to start recording!', ephemeral: true });
+    }
+    return;
   }
 
   const connection = joinVoiceChannel({
@@ -84,7 +88,6 @@ async function startRecording(interaction, voiceChannel) {
 
   voiceChannel.members.forEach(member => {
     if (member.user.bot) return;
-
     const opusStream = receiver.subscribe(member.id, { end: { behavior: EndBehaviorType.Manual } });
     const decoder = new prism.opus.Decoder({
       frameSize: 960,
@@ -100,41 +103,32 @@ async function startRecording(interaction, voiceChannel) {
     recordings[voiceChannel.id][member.id] = { outputStream, opusStream, decoder };
   });
 
-  if (interaction.replied || interaction.deferred) {
-    if (typeof interaction.followUp === "function") {
-      await interaction.followUp('🔴 Recording started!');
-    }
-  } else {
-    if (typeof interaction.reply === "function") {
-      await interaction.reply('🔴 Recording started!');
-    }
+  // If it's an interaction, reply or follow up
+  if (typeof interaction.deferReply === "function" && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
+    if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
+    await interaction.editReply('🔴 Recording started!');
+  } else if (typeof interaction.reply === "function") {
+    await interaction.reply('🔴 Recording started!');
   }
 }
 
 async function stopRecording(interaction, voiceChannel) {
   const connection = getVoiceConnection(voiceChannel.guild.id);
 
+  // Defensive reply handling: always reply, never double reply
   if (!recordings[voiceChannel.id]) {
-    if (!interaction.replied && !interaction.deferred) {
-      if (typeof interaction.reply === "function") {
-        await interaction.reply({ content: '❌ No active recording in this channel.', ephemeral: true });
-      }
-    } else {
-      if (typeof interaction.followUp === "function") {
-        await interaction.followUp({ content: '❌ No active recording in this channel.', ephemeral: true });
-      }
+    if (typeof interaction.deferReply === "function" && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
+      if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
+      await interaction.editReply({ content: '❌ No active recording in this channel.', ephemeral: true });
+    } else if (typeof interaction.reply === "function") {
+      await interaction.reply({ content: '❌ No active recording in this channel.', ephemeral: true });
     }
     if (connection) connection.destroy();
     return;
   }
 
-  // Type check before calling deferReply
-  if (
-    typeof interaction.deferReply === "function" &&
-    interaction.isChatInputCommand &&
-    interaction.isChatInputCommand()
-  ) {
-    if (!interaction.deferred) await interaction.deferReply();
+  if (typeof interaction.deferReply === "function" && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
+    if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
   }
 
   Object.values(recordings[voiceChannel.id]).forEach(({ outputStream, opusStream, decoder }) => {
@@ -209,7 +203,7 @@ async function stopRecording(interaction, voiceChannel) {
   });
 }
 
-// Prefix commands (message-based)
+// Prefix command support
 client.on('messageCreate', async message => {
   if (!message.guild || message.author.bot) return;
   if (message.content === "!record") {
@@ -224,18 +218,21 @@ client.on('messageCreate', async message => {
   }
 });
 
-// Slash commands (interaction-based)
+// Slash command support
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
+  const voiceChannel = interaction.member.voice.channel;
+  if (!voiceChannel) {
+    if (!interaction.deferred && !interaction.replied && typeof interaction.reply === "function") {
+      await interaction.reply({ content: 'Join a voice channel first!', ephemeral: true });
+    }
+    return;
+  }
   if (interaction.commandName === 'record') {
-    const voiceChannel = interaction.member.voice.channel;
-    if (!voiceChannel) return interaction.reply('Join a voice channel first!');
-    startRecording(interaction, voiceChannel);
+    await startRecording(interaction, voiceChannel);
   }
   if (interaction.commandName === 'stop') {
-    const voiceChannel = interaction.member.voice.channel;
-    if (!voiceChannel) return interaction.reply('Join a voice channel first!');
-    stopRecording(interaction, voiceChannel);
+    await stopRecording(interaction, voiceChannel);
   }
 });
 
@@ -256,7 +253,7 @@ async function uploadToGoogleDrive(filename) {
 
   const fileMetadata = {
     name: path.basename(filename),
-    parents: ['16skCffdbQtO1J2ZLO18mGy2zsm-Xptb3'] // Replace with your new folder ID
+    parents: ['16skCffdbQtO1J2ZLO18mGy2zsm-Xptb3'] // Replace with your folder ID
   };
   const media = {
     mimeType: 'audio/mp3',
